@@ -189,7 +189,7 @@ class CongressMember < ActiveRecord::Base
     fill_out_form_with_capybara f, :webkit, &block
   end
 
-  def fill_out_form_with_capybara f={}, driver
+  def fill_out_form_with_capybara f={}, driver, &block
     session = Capybara::Session.new(driver)
     session.driver.options[:js_errors] = false if driver == :poltergeist
     session.driver.options[:phantomjs_options] = ['--ssl-protocol=TLSv1'] if driver == :poltergeist
@@ -204,124 +204,10 @@ class CongressMember < ActiveRecord::Base
 
     begin
       actions.order(:step).each do |a|
-        case a.action
-        when "visit"
-          session.visit(a.value)
-        when "wait"
-          sleep a.value.to_i
-        when "fill_in"
-          if a.value.starts_with?("$")
-            if a.value == "$CAPTCHA_SOLUTION"
-              if a.captcha_selector == ".g-recaptcha iframe"
-                begin
-                  url = self.class::save_google_recaptcha_and_store_poltergeist(session)
-                  captcha_value = yield url
-                  frame = session.find(a.captcha_selector)
-                  session.within_frame(0) do
-                      for i in captcha_value.split(",")
-                        session.execute_script("document.querySelector('.fbc-imageselect-checkbox-#{i}').checked=true")
-                      end
-                      sleep 0.5
-                      session.find(".fbc-button-verify input").click
-                      @recaptcha_value = session.find("textarea").value
-                  end
-                  session.fill_in(a.name,with:@recaptcha_value)
-                rescue Exception => e
-                  p e.message
-                  url = nil
-                  captcha_value = nil
-                  retry
-                end
-              else
-                location = CAPTCHA_LOCATIONS.keys.include?(bioguide_id) ? CAPTCHA_LOCATIONS[bioguide_id] : session.driver.evaluate_script('document.querySelector("' + a.captcha_selector.gsub('"', '\"') + '").getBoundingClientRect();')
-                url = self.class::save_captcha_and_store_poltergeist session, location["left"], location["top"], location["width"], location["height"]
+        
+        execute_capybara_action a,f,session,&block
 
-                captcha_value = yield url
-                session.find(a.selector).set(captcha_value)
-              end
-            else
-              if a.options
-                options = YAML.load a.options
-                if options.include? "max_length"
-                  f[a.value] = f[a.value][0...(0.95 * options["max_length"]).floor]
-                end
-              end
-              session.find(a.selector).set(f[a.value].gsub("\t","    ")) unless f[a.value].nil?
-            end
-          else
-            session.find(a.selector).set(a.value) unless a.value.nil?
-          end
-        when "select"
-          begin
-            session.within a.selector do
-              if f[a.value].nil?
-                unless PLACEHOLDER_VALUES.include? a.value
-                  begin
-                    elem = session.find('option[value="' + a.value.gsub('"', '\"') + '"]')
-                  rescue Capybara::Ambiguous
-                    elem = session.first('option[value="' + a.value.gsub('"', '\"') + '"]')
-                  rescue Capybara::ElementNotFound
-                    begin
-                      elem = session.find('option', text: Regexp.compile("^" + Regexp.escape(a.value) + "$"))
-                    rescue Capybara::Ambiguous
-                      elem = session.first('option', text: Regexp.compile("^" + Regexp.escape(a.value) + "$"))
-                    end
-                  end
-                  elem.select_option
-                end
-              else
-                begin
-                  elem = session.find('option[value="' + f[a.value].gsub('"', '\"') + '"]')
-                rescue Capybara::Ambiguous
-                  elem = session.first('option[value="' + f[a.value].gsub('"', '\"') + '"]')
-                rescue Capybara::ElementNotFound
-                  begin
-                    elem = session.find('option', text: Regexp.compile("^" + Regexp.escape(f[a.value]) + "$"))
-                  rescue Capybara::Ambiguous
-                    elem = session.first('option', text: Regexp.compile("^" + Regexp.escape(f[a.value]) + "$"))
-                  end
-                end
-                elem.select_option
-              end
-            end
-          rescue Capybara::ElementNotFound => e
-            raise e, e.message unless a.options == "DEPENDENT"
-          end
-        when "click_on"
-          session.find(a.selector).click
-        when "find"
-          wait_val = DEFAULT_FIND_WAIT_TIME
-          if a.options
-            options_hash = YAML.load a.options
-            wait_val = options_hash['wait'] || DEFAULT_FIND_WAIT_TIME
-          end
-          if a.value.nil?
-            session.find(a.selector, wait: wait_val)
-          else
-            session.find(a.selector, text: Regexp.compile(a.value), wait: wait_val)
-          end
-        when "check"
-          session.find(a.selector).set(true)
-        when "uncheck"
-          session.find(a.selector).set(false)
-        when "choose"
-          if a.options.nil?
-            session.find(a.selector).set(true)
-          else
-            session.find(a.selector + '[value="' + f[a.value].gsub('"', '\"') + '"]').set(true)
-          end
-        when "javascript"
-          session.driver.evaluate_script(a.value)
-        when "iframe"
-          if a.value == 'back'
-            session.switch_to.default_content
-          else
-            iframe = session.find(a.value)
-            session.switch_to.frame(a.selector)
-          end
-        end
       end
-
       success = check_success session.text
 
       success_hash = {success: success}
@@ -349,6 +235,118 @@ class CongressMember < ActiveRecord::Base
         socket.close
         Process.kill(3, pid)
       end
+    end
+  end
+
+  def execute_capybara_action a,f,session
+    case a.action
+    when "visit"
+      session.visit(a.value)
+    when "wait"
+      sleep a.value.to_i
+    when "fill_in"
+      if a.value.starts_with?("$")
+        if a.value == "$CAPTCHA_SOLUTION"
+          if a.captcha_selector == ".g-recaptcha iframe"
+            begin
+              url = self.class::save_google_recaptcha_and_store_poltergeist(session)
+              captcha_value = yield url
+              frame = session.find(a.captcha_selector)
+              session.within_frame(0) do
+                  for i in captcha_value.split(",")
+                    session.execute_script("document.querySelector('.fbc-imageselect-checkbox-#{i}').checked=true")
+                  end
+                  sleep 0.5
+                  session.find(".fbc-button-verify input").click
+                  @recaptcha_value = session.find("textarea").value
+              end
+              session.fill_in(a.name,with:@recaptcha_value)
+            rescue Exception => e
+              p e.message
+              url = nil
+              captcha_value = nil
+              retry
+            end
+          else
+            location = CAPTCHA_LOCATIONS.keys.include?(bioguide_id) ? CAPTCHA_LOCATIONS[bioguide_id] : session.driver.evaluate_script('document.querySelector("' + a.captcha_selector.gsub('"', '\"') + '").getBoundingClientRect();')
+            url = self.class::save_captcha_and_store_poltergeist session, location["left"], location["top"], location["width"], location["height"]
+
+            captcha_value = yield url
+            session.find(a.selector).set(captcha_value)
+          end
+        else
+          if a.options
+            options = YAML.load a.options
+            if options.include? "max_length"
+              f[a.value] = f[a.value][0...(0.95 * options["max_length"]).floor]
+            end
+          end
+          session.find(a.selector).set(f[a.value].gsub("\t","    ")) unless f[a.value].nil?
+        end
+      else
+        session.find(a.selector).set(a.value) unless a.value.nil?
+      end
+    when "select"
+      begin
+        session.within a.selector do
+          if f[a.value].nil?
+            unless PLACEHOLDER_VALUES.include? a.value
+              begin
+                elem = session.find('option[value="' + a.value.gsub('"', '\"') + '"]')
+              rescue Capybara::Ambiguous
+                elem = session.first('option[value="' + a.value.gsub('"', '\"') + '"]')
+              rescue Capybara::ElementNotFound
+                begin
+                  elem = session.find('option', text: Regexp.compile("^" + Regexp.escape(a.value) + "$"))
+                rescue Capybara::Ambiguous
+                  elem = session.first('option', text: Regexp.compile("^" + Regexp.escape(a.value) + "$"))
+                end
+              end
+              elem.select_option
+            end
+          else
+            begin
+              elem = session.find('option[value="' + f[a.value].gsub('"', '\"') + '"]')
+            rescue Capybara::Ambiguous
+              elem = session.first('option[value="' + f[a.value].gsub('"', '\"') + '"]')
+            rescue Capybara::ElementNotFound
+              begin
+                elem = session.find('option', text: Regexp.compile("^" + Regexp.escape(f[a.value]) + "$"))
+              rescue Capybara::Ambiguous
+                elem = session.first('option', text: Regexp.compile("^" + Regexp.escape(f[a.value]) + "$"))
+              end
+            end
+            elem.select_option
+          end
+        end
+      rescue Capybara::ElementNotFound => e
+        raise e, e.message unless a.options == "DEPENDENT"
+      end
+    when "click_on"
+      session.find(a.selector).click
+    when "find"
+      wait_val = DEFAULT_FIND_WAIT_TIME
+      if a.options
+        options_hash = YAML.load a.options
+        wait_val = options_hash['wait'] || DEFAULT_FIND_WAIT_TIME
+      end
+      if a.value.nil?
+        session.find(a.selector, wait: wait_val)
+      else
+        session.find(a.selector, text: Regexp.compile(a.value), wait: wait_val)
+      end
+    when "check"
+      session.find(a.selector).set(true)
+    when "uncheck"
+      session.find(a.selector).set(false)
+    when "choose"
+      if a.options.nil?
+        session.find(a.selector).set(true)
+      else
+        session.find(a.selector + '[value="' + f[a.value].gsub('"', '\"') + '"]').set(true)
+      end
+    when "javascript"
+      session.driver.evaluate_script(a.value)
     end
   end
 
