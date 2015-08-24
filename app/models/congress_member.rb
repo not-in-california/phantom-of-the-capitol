@@ -429,7 +429,7 @@ class CongressMember < ActiveRecord::Base
   end
 
   def has_google_recaptcha?
-    !actions.select{|action|action.options and action.options['google_recaptcha']}.nil?
+    !actions.select{|action|action.options and action.options['google_recaptcha']}.empty?
   end
 
   def check_success body_text
