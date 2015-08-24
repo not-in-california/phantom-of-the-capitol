@@ -242,6 +242,7 @@ class CongressMember < ActiveRecord::Base
     end
   end
 
+
   def execute_capybara_action a,f,session
     case a.action
     when "visit"
@@ -348,6 +349,15 @@ class CongressMember < ActiveRecord::Base
     when "javascript"
       session.driver.evaluate_script(a.value)
     end
+  end
+
+  def clear_iframes(session)
+    session.execute_script("
+      var elements = document.querySelectorAll('iframe');
+      Array.prototype.forEach.call(elements, function(el, i){
+        if (!el.parentNode.parentNode.parentNode.parentNode.classList.contains('g-recaptcha')) { el.parentNode.removeChild(el); }
+      });
+    ")
   end
 
   def self.crop_screenshot_from_coords screenshot_location, x, y, width, height
