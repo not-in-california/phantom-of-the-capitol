@@ -204,8 +204,14 @@ class CongressMember < ActiveRecord::Base
 
     begin
       actions.order(:step).each do |a|
-        
-        execute_capybara_action a,f,session,&block
+        if a.within_frame
+          frame = session.find(a.within_frame)
+          session.within_frame(frame) do
+            execute_capybara_action a,f,session,&block
+          end
+        else
+          execute_capybara_action a,f,session,&block
+        end
 
       end
       success = check_success session.text
