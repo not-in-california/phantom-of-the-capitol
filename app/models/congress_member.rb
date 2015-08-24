@@ -50,8 +50,6 @@ class CongressMember < ActiveRecord::Base
           success_hash = fill_out_form_with_poltergeist f, &block
         end
       rescue Exception => e
-        p e.message
-        pp e.backtrace
         status_fields[:status] = "error"
         message = YAML.load(e.message)
         status_fields[:extra][:screenshot] = message[:screenshot] if message.is_a?(Hash) and message.include? :screenshot
@@ -253,24 +251,20 @@ class CongressMember < ActiveRecord::Base
     when "fill_in"
       if a.value.starts_with?("$")
         if a.value == "$CAPTCHA_SOLUTION"
-          if a.captcha_selector == ".g-recaptcha iframe"
+          if a.options and a.options["google_recaptcha"]
             begin
-              url = self.class::save_google_recaptcha_and_store_poltergeist(session)
+              url = self.class::save_google_recaptcha_and_store_poltergeist(session,a.captcha_selector)
               captcha_value = yield url
-              frame = session.find(a.captcha_selector)
               session.within_frame(0) do
-                  for i in captcha_value.split(",")
-                    session.execute_script("document.querySelector('.fbc-imageselect-checkbox-#{i}').checked=true")
-                  end
-                  sleep 0.5
-                  session.find(".fbc-button-verify input").click
-                  @recaptcha_value = session.find("textarea").value
+                for i in captcha_value.split(",")
+                  session.execute_script("document.querySelector('.fbc-imageselect-checkbox-#{i}').checked=true")
+                end
+                sleep 0.5
+                session.find(".fbc-button-verify input").click
+                @recaptcha_value = session.find("textarea").value
               end
               session.fill_in(a.name,with:@recaptcha_value)
             rescue Exception => e
-              p e.message
-              url = nil
-              captcha_value = nil
               retry
             end
           else
@@ -408,9 +402,9 @@ class CongressMember < ActiveRecord::Base
     url
   end
 
-  def self.save_google_recaptcha_and_store_poltergeist session
+  def self.save_google_recaptcha_and_store_poltergeist session,selector
     screenshot_location = random_captcha_location
-    session.save_screenshot(screenshot_location,selector:".g-recaptcha iframe")
+    session.save_screenshot(screenshot_location,selector:selector)
     url = store_captcha_from_location screenshot_location
     File.unlink screenshot_location
     url
