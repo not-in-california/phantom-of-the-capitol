@@ -242,7 +242,6 @@ class CongressMember < ActiveRecord::Base
     end
   end
 
-
   def execute_capybara_action a,f,session
     case a.action
     when "visit"
@@ -256,7 +255,7 @@ class CongressMember < ActiveRecord::Base
             begin
               url = self.class::save_google_recaptcha_and_store_poltergeist(session,a.captcha_selector)
               captcha_value = yield url
-              session.within_frame(0) do
+              session.within_frame(recaptcha_frame_index(session)) do
                 for i in captcha_value.split(",")
                   session.execute_script("document.querySelector('.fbc-imageselect-checkbox-#{i}').checked=true")
                 end
@@ -351,13 +350,13 @@ class CongressMember < ActiveRecord::Base
     end
   end
 
-  def clear_iframes(session)
-    session.execute_script("
-      var elements = document.querySelectorAll('iframe');
-      Array.prototype.forEach.call(elements, function(el, i){
-        if (!el.parentNode.parentNode.parentNode.parentNode.classList.contains('g-recaptcha')) { el.parentNode.removeChild(el); }
-      });
-    ")
+  def recaptcha_frame_index(session)
+    (0..10).each do |frame_index|
+      if  session.within_frame(frame_index){session.current_url} =~ /recaptcha/
+        return frame_index
+      end
+    end
+    raise
   end
 
   def self.crop_screenshot_from_coords screenshot_location, x, y, width, height
